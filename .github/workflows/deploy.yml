@@ -1,0 +1,136 @@
+name: Deploy CDK Stack
+
+on:
+  push:
+    branches: [ add_actions ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    # Allows manual triggering
+
+permissions:
+  contents: read
+  id-token: write # Required for requesting the JWT
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: CDK Synth
+        run: cdk synth
+
+      - name: CDK Bootstrap
+        run: cdk bootstrap aws://${{ secrets.AWS_ACCESS_KEY_ID }}/${{ secrets.AWS_REGION }}
+
+      - name: CDK Deploy
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: cdk deploy --require-approval never
+
+      - name: Extract Stack Outputs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: stack-outputs
+        run: |
+          BUCKET_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.BucketName')
+          LAMBDA_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.LambdaFunction')
+          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+          echo "lambda_name=$LAMBDA_NAME" >> $GITHUB_OUTPUT
+          echo "Bucket Name: $BUCKET_NAME"
+          echo "Lambda Function: $LAMBDA_NAME"
+
+      - name: Create and Upload Test File
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo '{"message": "Test from GitHub Actions", "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"}' > sample.txt
+          cat sample.txt
+          aws s3 cp sample.txt s3://${{ steps.stack-outputs.outputs.bucket_name }}/sample.txt
+          echo "Test file uploaded to S3 bucket"
+
+      - name: Wait for Lambda Execution
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Waiting for Lambda to process the file..."
+          sleep 10  # Give Lambda some time to process
+
+      - name: Check Lambda Logs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: check-logs
+        run: |
+          # Create log group name from Lambda function name
+          LOG_GROUP_NAME="/aws/lambda/${{ steps.stack-outputs.outputs.lambda_name }}"
+          echo "Checking log group: $LOG_GROUP_NAME"
+          
+          # Get the latest log stream
+          LOG_STREAM=$(aws logs describe-log-streams \
+            --log-group-name "$LOG_GROUP_NAME" \
+            --order-by LastEventTime \
+            --descending \
+            --limit 1 \
+            --query 'logStreams[0].logStreamName' \
+            --output text)
+          
+          echo "Latest log stream: $LOG_STREAM"
+          
+          # Check logs for successful processing
+          CURRENT_TIME=$(date +%s)
+          START_TIME=$((CURRENT_TIME - 300))  # 5 minutes ago
+          END_TIME=$CURRENT_TIME
+          
+          # Get logs and search for successful processing
+          LOGS=$(aws logs get-log-events \
+            --log-group-name "$LOG_GROUP_NAME" \
+            --log-stream-name "$LOG_STREAM" \
+            --start-time $((START_TIME * 1000)) \
+            --end-time $((END_TIME * 1000)))
+          
+          echo "Recent logs:"
+          echo "$LOGS" | jq -r '.events[].message'
+          
+          # Check if processing was successful
+          if echo "$LOGS" | grep -q "Processed content"; then
+            echo "✅ Lambda function processed the file successfully!"
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Lambda function did not process the file or encountered an error."
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify Lambda Execution
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ steps.check-logs.outputs.success }}" == "true" ]; then
+            echo "✅ End-to-end test passed! Lambda successfully processed the uploaded file."
+          else
+            echo "❌ End-to-end test failed! Lambda did not process the file correctly."
+            exit 1
+          fi
+      - name: Cleanup Resources
+        if: always() # Run even if previous steps failed
+        run: |
+          echo "Cleaning up resources..."
+          # Empty the S3 bucket first to avoid deletion failures
+          aws s3 rm s3://${{ steps.stack-outputs.outputs.bucket_name }} --recursive || true
+          # Destroy the CDK stack
+          cdk destroy --force
+          echo "✅ Resources destroyed successfully"
