@@ -8,3 +8,53 @@ __pycache__
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# CDK-specific files
+cdk.out/
+cdk.context.json
+.cdk.staging/
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# AWS SAM build artifacts
+.aws-sam/
+
+# Environment variables
+.env
+.env.*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Node (in case CDK uses any Node.js components)
+node_modules/

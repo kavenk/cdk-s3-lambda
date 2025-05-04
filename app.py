@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 import os
-
 import aws_cdk as cdk
+from cdk_s3_lambda_stack import CdkS3LambdaStack
 
-from cdk_s3_lambda_module.cdk_s3_lambda_module_stack import CdkS3LambdaModuleStack
-
-
-app = cdk.App()
-CdkS3LambdaModuleStack(app, "CdkS3LambdaModuleStack",
-    # If you don't specify 'env', this stack will be environment-agnostic.
-    # Account/Region-dependent features and context lookups will not work,
-    # but a single synthesized template can be deployed anywhere.
-
-    # Uncomment the next line to specialize this stack for the AWS Account
-    # and Region that are implied by the current CLI configuration.
-
-    #env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')),
-
-    # Uncomment the next line if you know exactly what Account and Region you
-    # want to deploy the stack to. */
-
-    #env=cdk.Environment(account='123456789012', region='us-east-1'),
-
-    # For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
+def main():
+    """
+    Main entry point for the CDK application.
+    Creates and deploys the S3 Lambda processor stack.
+    """
+    app = cdk.App()
+    
+    # Deploy to the default AWS account and region from environment variables
+    env = cdk.Environment(
+        account=os.getenv("CDK_DEFAULT_ACCOUNT"),
+        region=os.getenv("CDK_DEFAULT_REGION")
     )
+    
+    # Create the stack instance
+    CdkS3LambdaStack(app, "CdkS3LambdaStack", env=env)
+    
+    # Synthesize the CloudFormation template
+    app.synth()
 
-app.synth()
+if __name__ == "__main__":
+    main()
