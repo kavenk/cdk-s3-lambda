@@ -195,7 +195,7 @@ jobs:
 
   destroy:
     name: Destroy Resources
-    needs: [deploy, verify]
+    needs: [deploy]
     runs-on: ubuntu-latest
     if: always() # Run even if verify job failed
     steps:
