@@ -53,7 +53,7 @@ jobs:
 
       - name: CDK Deploy
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        run: cdk deploy --require-approval never
+        run: cdk deploy --require-approval never --outputs-file cdk-outputs.json
 
       - name: Extract Stack Outputs
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
