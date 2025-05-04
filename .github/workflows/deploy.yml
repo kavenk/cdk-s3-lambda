@@ -1,4 +1,4 @@
-name: Deploy CDK Stack
+name: CDK S3 Lambda Module Workflow
 
 on:
   push:
@@ -13,11 +13,19 @@ permissions:
   id-token: write # Required for requesting the JWT
 
 jobs:
-  deploy:
+  setup:
+    name: Setup Environment
     runs-on: ubuntu-latest
+    outputs:
+      account_id: ${{ steps.aws-account.outputs.account_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -51,12 +59,46 @@ jobs:
       - name: CDK Bootstrap
         run: cdk bootstrap aws://${{ steps.aws-account.outputs.account_id }}/${{ secrets.AWS_REGION }}
 
+  deploy:
+    name: Deploy CDK Stack
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      bucket_name: ${{ steps.stack-outputs.outputs.bucket_name }}
+      lambda_name: ${{ steps.stack-outputs.outputs.lambda_name }}
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js and Python
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm install -g aws-cdk
+          pip install awscli
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: CDK Deploy
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: cdk deploy --require-approval never --outputs-file cdk-outputs.json
 
       - name: Extract Stack Outputs
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: stack-outputs
         run: |
           if [ ! -f cdk-outputs.json ]; then
@@ -84,26 +126,40 @@ jobs:
           echo "Bucket Name: $BUCKET_NAME"
           echo "Lambda Function: $LAMBDA_NAME"
 
+  verify:
+    name: Verify Deployment
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install AWS CLI
+        run: |
+          pip install awscli jq
+
       - name: Create and Upload Test File
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           echo '{"message": "Test from GitHub Actions", "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"}' > sample.txt
           cat sample.txt
-          aws s3 cp sample.txt s3://${{ steps.stack-outputs.outputs.bucket_name }}/sample.txt
+          aws s3 cp sample.txt s3://${{ needs.deploy.outputs.bucket_name }}/sample.txt
           echo "Test file uploaded to S3 bucket"
 
       - name: Wait for Lambda Execution
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           echo "Waiting for Lambda to process the file..."
           sleep 10  # Give Lambda some time to process
 
       - name: Check Lambda Logs
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: check-logs
         run: |
           # Create log group name from Lambda function name
-          LOG_GROUP_NAME="/aws/lambda/${{ steps.stack-outputs.outputs.lambda_name }}"
+          LOG_GROUP_NAME="/aws/lambda/${{ needs.deploy.outputs.lambda_name }}"
           echo "Checking log group: $LOG_GROUP_NAME"
           
           # Get the latest log stream
@@ -142,7 +198,6 @@ jobs:
           fi
 
       - name: Verify Lambda Execution
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ steps.check-logs.outputs.success }}" == "true" ]; then
             echo "✅ End-to-end test passed! Lambda successfully processed the uploaded file."
@@ -150,12 +205,45 @@ jobs:
             echo "❌ End-to-end test failed! Lambda did not process the file correctly."
             exit 1
           fi
+
+  destroy:
+    name: Destroy Resources
+    needs: [deploy, verify]
+    runs-on: ubuntu-latest
+    if: always() # Run even if verify job failed
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js and Python
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm install -g aws-cdk
+          pip install awscli
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Cleanup Resources
-        if: always() # Run even if previous steps failed
         run: |
           echo "Cleaning up resources..."
           # Empty the S3 bucket first to avoid deletion failures
-          aws s3 rm s3://${{ steps.stack-outputs.outputs.bucket_name }} --recursive || true
+          aws s3 rm s3://${{ needs.deploy.outputs.bucket_name }} --recursive || true
           # Destroy the CDK stack
           cdk destroy --force
           echo "✅ Resources destroyed successfully"
