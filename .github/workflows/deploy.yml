@@ -59,8 +59,26 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: stack-outputs
         run: |
-          BUCKET_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.BucketName')
-          LAMBDA_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.LambdaFunction')
+          if [ ! -f cdk-outputs.json ]; then
+            echo "cdk-outputs.json file not found!"
+            ls -la
+            exit 1
+          fi
+          
+          # Display the full content of the outputs file for debugging
+          echo "CDK Outputs file content:"
+          cat cdk-outputs.json
+          
+          # Extract the values with error handling
+          BUCKET_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.BucketName // empty')
+          LAMBDA_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.LambdaFunction // empty')
+          
+          # Check if values were extracted
+          if [ -z "$BUCKET_NAME" ] || [ -z "$LAMBDA_NAME" ]; then
+            echo "Failed to extract values from outputs file"
+            exit 1
+          fi
+          
           echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
           echo "lambda_name=$LAMBDA_NAME" >> $GITHUB_OUTPUT
           echo "Bucket Name: $BUCKET_NAME"
