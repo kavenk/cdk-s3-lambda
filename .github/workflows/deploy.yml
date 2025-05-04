@@ -70,8 +70,8 @@ jobs:
           cat cdk-outputs.json
           
           # Extract the values with error handling
-          BUCKET_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.BucketName // empty')
-          LAMBDA_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaModuleStack.LambdaFunction // empty')
+          BUCKET_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaStack.BucketName // empty')
+          LAMBDA_NAME=$(cat cdk-outputs.json | jq -r '.CdkS3LambdaStack.LambdaFunction // empty')
           
           # Check if values were extracted
           if [ -z "$BUCKET_NAME" ] || [ -z "$LAMBDA_NAME" ]; then
