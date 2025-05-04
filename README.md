@@ -1,10 +1,6 @@
 
 # Welcome to your CDK Python project!
 
-This is a blank project for CDK development with Python.
-
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
-
 This project is set up like a standard Python project.  The initialization
 process also creates a virtualenv within this project, stored under the `.venv`
 directory.  To create the virtualenv it assumes that there is a `python3`
@@ -12,40 +8,89 @@ directory.  To create the virtualenv it assumes that there is a `python3`
 package. If for any reason the automatic creation of the virtualenv fails,
 you can create the virtualenv manually.
 
-To manually create a virtualenv on MacOS and Linux:
 
-```
-$ python3 -m venv .venv
+# CDK S3 Lambda Module
+
+AWS CDK project that creates an S3 bucket and Lambda function that processes uploaded files.
+
+## Local Setup and Testing
+
+### Prerequisites
+
+- AWS CLI
+- Node.js (v14+)
+- Python 3.12
+- Git
+
+### Quick Start
+
+```bash
+# Extract and cd to the repository
+
+cd cdk-s3-lambda-module
+
+# Alternatively you can clone it from 
+git clone https://github.com/kavenk/cdk-s3-lambda.git
+
+# Configure AWS credentials
+aws configure
+# Enter your AWS Access Key ID, Secret Access Key, region (e.g., us-east-1), and output format (json)
+
+# Install dependencies
+npm install -g aws-cdk                     # Install CDK CLI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip        # Update pip
+pip install -r requirements.txt  # Install Python dependencies
+
+# Deploy the stack
+cdk bootstrap                              # Only needed first time in an AWS account/region
+cdk deploy --require-approval never        # Deploy the stack
+
+# Get the bucket name from the output
+BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name CdkS3LambdaStack --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
+
+# Test by uploading a file
+echo '{"message": "Test file", "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"}' > sample.txt
+aws s3 cp sample.txt s3://$BUCKET_NAME/sample.txt
+
+# Check Lambda logs
+LAMBDA_NAME=$(aws cloudformation describe-stacks --stack-name CdkS3LambdaStack --query "Stacks[0].Outputs[?OutputKey=='LambdaFunction'].OutputValue" --output text)
+aws logs tail /aws/lambda/$LAMBDA_NAME --follow
+
+# Destroy the stack when done
+aws s3 rm s3://$BUCKET_NAME --recursive    # Empty bucket first
+cdk destroy --force                        # Delete all resources
 ```
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+### Project Structure
 
-```
-$ source .venv/bin/activate
-```
+- `cdk_s3_lambda_module/` - CDK infrastructure code
+- `lambda/` - Lambda function code
+- `tests/` - Unit tests
 
-If you are a Windows platform, you would activate the virtualenv like this:
+### Local Development 
 
-```
-% .venv\Scripts\activate.bat
-```
+1. Make changes to CDK stack in `cdk_s3_lambda_module/cdk_s3_lambda_module_stack.py`
+2. Test with `cdk synth` to generate CloudFormation template
+3. Deploy changes with `cdk deploy`
 
-Once the virtualenv is activated, you can install the required dependencies.
+### Lambda Development
 
-```
-$ pip install -r requirements.txt
-```
+1. Edit Lambda function in `lambda/file_processor.py`
+2. Test locally with sample events
+3. Deploy with `cdk deploy`
 
-At this point you can now synthesize the CloudFormation template for this code.
+## GitHub Actions Workflow
 
-```
-$ cdk synth
-```
+The repository includes a GitHub Actions workflow that:
+1. Sets up the environment
+2. Deploys the CDK stack
+3. Tests the Lambda by uploading a file
+4. Verifies the Lambda processed it correctly
+5. Cleans up all resources
 
-To add additional dependencies, for example other CDK libraries, just add
-them to your `setup.py` file and rerun the `pip install -r requirements.txt`
-command.
+
 
 ## Useful commands
 
